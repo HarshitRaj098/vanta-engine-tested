@@ -1,0 +1,6 @@
+{
+  "name": "PIXEL-OS — Spatial Cloud Desktop",
+  "description": "A pixel-art retro desktop operating system with real filesystem, browser, calculator, code studio, and terminal connected to a cloud virtual machine runtime.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
