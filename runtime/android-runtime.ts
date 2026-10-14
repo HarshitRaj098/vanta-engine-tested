@@ -1,5 +1,6 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readApkPackageName } from "./apk-metadata.js";
 import { Buffer } from "node:buffer";
 import { access, readFile } from "node:fs/promises";
 import process from "node:process";
@@ -474,6 +475,29 @@ export async function installApk(filePath: string, packageName: string, serial?:
     }
   } catch (error) {
     return { ok: false, status: "APK_UNAVAILABLE", reason: error instanceof Error ? error.message : "Cannot read APK." };
+  }
+
+  let actualPackageName: string;
+  try {
+    actualPackageName = await readApkPackageName(safePath);
+  } catch (error) {
+    return {
+      ok: false,
+      status: "APK_MANIFEST_UNREADABLE",
+      reason: error instanceof Error ? error.message : "Could not read package identity from AndroidManifest.xml.",
+    };
+  }
+  if (!isValidPackageName(actualPackageName)) {
+    return { ok: false, status: "APK_MANIFEST_INVALID", reason: "The package name extracted from the APK manifest is invalid." };
+  }
+  if (actualPackageName !== packageName) {
+    return {
+      ok: false,
+      status: "APK_PACKAGE_MISMATCH",
+      reason: `Selected package ${packageName} does not match APK manifest package ${actualPackageName}.`,
+      actualPackageName,
+      expectedPackageName: packageName,
+    };
   }
 
   const remoteConfig = getRemoteAgentConfig();
