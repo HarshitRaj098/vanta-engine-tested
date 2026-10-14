@@ -1,8 +1,7 @@
 import { execFile as execFileCallback } from "node:child_process";
+import { Buffer } from "node:buffer";
 import { access, readFile } from "node:fs/promises";
-import { promisify } from "node:util";
-
-const executeFile = promisify(execFileCallback);
+import process from "node:process";
 const COMMAND_TIMEOUT_MS = 5_000;
 const MAX_BUFFER_BYTES = 1024 * 1024;
 
@@ -52,7 +51,7 @@ export async function runCommand(
       args,
       { timeout, maxBuffer: MAX_BUFFER_BYTES, encoding: "utf8", windowsHide: true },
       (error, stdout, stderr) => {
-        const typedError = error as (NodeJS.ErrnoException & { code?: string | number }) | null;
+        const typedError = error as ({ code?: string | number } | null);
         const numericExit = typeof typedError?.code === "number" ? typedError.code : error ? null : 0;
         resolve({
           ok: !error,
@@ -347,7 +346,7 @@ export async function installApk(filePath: string, packageName: string, serial?:
   const install = runtime.adapter === "waydroid"
     ? await runCommand("waydroid", ["app", "install", safePath], 120_000)
     : await runCommand("adb", ["-s", runtime.target!.serial, "install", "-r", safePath], 120_000);
-  if (!install.ok || !/success/i.test(install.stdout + "\n" + install.stderr)) {
+  if (!install.ok || /\\bFailure\\b|Error\\[/i.test(install.stdout + "\n" + install.stderr)) {
     return { ok: false, status: "INSTALL_FAILED", runtime, commandExitCode: install.exitCode, stdout: install.stdout, stderr: install.stderr || install.errorCode };
   }
 
