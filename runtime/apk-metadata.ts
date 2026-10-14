@@ -148,7 +148,7 @@ export function parseAndroidManifestPackage(manifest: Buffer | Uint8Array | stri
       throw new Error("APK_MANIFEST_INVALID: binary XML chunk is malformed.");
     }
     if (type === 0x0001) strings = parseStringPool(data, offset, headerSize, chunkSize);
-    if (type === 0x0102 && strings.length > 0 && headerSize >= 16 + 20 && chunkSize >= 36) {
+    if (type === 0x0102 && strings.length > 0 && headerSize >= 16 && chunkSize >= 36) {
       const elementNameIndex = data.readUInt32LE(offset + 20);
       if (strings[elementNameIndex] === "manifest") {
         const attributeStart = data.readUInt16LE(offset + 24);
