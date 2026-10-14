@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import process from "node:process";
-import { parseAdbDevices, isValidPackageName, runCommand } from "./android-runtime.js";
+import { parseAdbDevices, isValidPackageName, runCommand, getRemoteAgentConfig } from "./android-runtime.js";
 
 test("parseAdbDevices ignores the header and blank lines", () => {
   assert.deepEqual(parseAdbDevices("List of devices attached\n\n"), []);
@@ -55,4 +55,33 @@ test("runCommand captures non-zero exit without throwing", async () => {
   assert.equal(result.ok, false);
   assert.equal(result.exitCode, 7);
   assert.equal(result.stderr, "EXPECTED_ERROR");
+});
+
+
+test("remote Android host requires a complete configuration", () => {
+  const oldUrl = process.env.ANDROID_HOST_AGENT_URL;
+  const oldToken = process.env.ANDROID_HOST_AGENT_CLIENT_TOKEN;
+  try {
+    delete process.env.ANDROID_HOST_AGENT_URL;
+    delete process.env.ANDROID_HOST_AGENT_CLIENT_TOKEN;
+    assert.deepEqual(getRemoteAgentConfig(), { state: "none" });
+
+    process.env.ANDROID_HOST_AGENT_CLIENT_TOKEN = "short";
+    assert.equal(getRemoteAgentConfig().state, "invalid");
+
+    process.env.ANDROID_HOST_AGENT_URL = "http://remote.example.test:4317";
+    process.env.ANDROID_HOST_AGENT_CLIENT_TOKEN = "a".repeat(64);
+    assert.equal(getRemoteAgentConfig().state, "invalid", "remote HTTP must not be accepted");
+
+    process.env.ANDROID_HOST_AGENT_URL = "https://android-host.example.test";
+    assert.equal(getRemoteAgentConfig().state, "configured");
+
+    process.env.ANDROID_HOST_AGENT_URL = "http://127.0.0.1:4317";
+    assert.equal(getRemoteAgentConfig().state, "configured", "loopback HTTP is allowed for local development");
+  } finally {
+    if (oldUrl === undefined) delete process.env.ANDROID_HOST_AGENT_URL;
+    else process.env.ANDROID_HOST_AGENT_URL = oldUrl;
+    if (oldToken === undefined) delete process.env.ANDROID_HOST_AGENT_CLIENT_TOKEN;
+    else process.env.ANDROID_HOST_AGENT_CLIENT_TOKEN = oldToken;
+  }
 });
