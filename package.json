@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test:runtime": "tsx --test runtime/android-runtime.test.ts"
+    "test:runtime": "tsx --test runtime/android-runtime.test.ts",
+    "android:host": "tsx runtime/android-host-agent-server.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
