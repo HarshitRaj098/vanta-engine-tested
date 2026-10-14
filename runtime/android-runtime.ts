@@ -40,6 +40,65 @@ export type AndroidRuntimeProbe = {
   diagnostics: string[];
 };
 
+export type RemoteAgentConfig =
+  | { state: "none" }
+  | { state: "invalid"; reason: string }
+  | { state: "configured"; baseUrl: string; token: string };
+
+export function getRemoteAgentConfig(): RemoteAgentConfig {
+  const rawUrl = process.env.ANDROID_HOST_AGENT_URL?.trim() ?? "";
+  const token = process.env.ANDROID_HOST_AGENT_TOKEN?.trim() ?? "";
+  if (!rawUrl && !token) return { state: "none" };
+  if (!rawUrl) return { state: "invalid", reason: "ANDROID_HOST_AGENT_URL is missing." };
+  if (token.length < 32 || token === "replace-with-at-least-32-random-characters") {
+    return { state: "invalid", reason: "ANDROID_HOST_AGENT_TOKEN must be a fresh secret of at least 32 characters." };
+  }
+  try {
+    const url = new URL(rawUrl);
+    if (url.username || url.password || url.search || url.hash) {
+      return { state: "invalid", reason: "The host-agent URL must not contain credentials, query parameters, or a fragment." };
+    }
+    const isLoopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback)) {
+      return { state: "invalid", reason: "Remote host-agent URLs must use HTTPS. Plain HTTP is allowed only for loopback development." };
+    }
+    return { state: "configured", baseUrl: url.href.replace(/\/+$/, ""), token };
+  } catch {
+    return { state: "invalid", reason: "ANDROID_HOST_AGENT_URL is not a valid URL." };
+  }
+}
+
+async function remoteAgentRequest(pathname: string, init: RequestInit = {}, timeoutMs = 10_000) {
+  const config = getRemoteAgentConfig();
+  if (config.state !== "configured") {
+    return {
+      ok: false,
+      status: 503,
+      data: { status: config.state === "invalid" ? "REMOTE_HOST_CONFIGURATION_INVALID" : "REMOTE_HOST_NOT_CONFIGURED", reason: config.state === "invalid" ? config.reason : "No remote Android host is configured." },
+    };
+  }
+  try {
+    const headers = new Headers(init.headers);
+    headers.set("Authorization", `Bearer ${config.token}`);
+    const response = await fetch(`${config.baseUrl}${pathname}`, {
+      ...init,
+      headers,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const data = await response.json().catch(() => ({}));
+    return { ok: response.ok, status: response.status, data: data as Record<string, any> };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 503,
+      data: {
+        status: "REMOTE_HOST_DISCONNECTED",
+        reason: error instanceof Error ? error.message : "Unable to connect to the configured Android host agent.",
+      },
+    };
+  }
+}
+
 export async function runCommand(
   command: string,
   args: string[] = [],
