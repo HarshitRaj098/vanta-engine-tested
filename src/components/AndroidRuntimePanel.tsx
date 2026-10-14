@@ -1,5 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Activity, AlertTriangle, CheckCircle2, RefreshCw, Smartphone, XCircle } from "lucide-react";
+import {
+  Activity, AlertTriangle, CheckCircle2, RefreshCw, Smartphone, XCircle,
+  Upload, Play, LockKeyhole, LoaderCircle,
+} from "lucide-react";
 
 type AndroidRuntimeStatus = {
   status: string;
@@ -22,6 +25,22 @@ type AndroidRuntimeStatus = {
   diagnostics?: string[];
 };
 
+type OperationResult = {
+  ok?: boolean;
+  status?: string;
+  error?: string;
+  message?: string;
+  reason?: string;
+  packageName?: string;
+  sha256?: string;
+  installOutput?: string;
+  verificationOutput?: string;
+  launchOutput?: string;
+  note?: string;
+  stderr?: string;
+  runtime?: { reason?: string; status?: string };
+};
+
 type Props = {
   onClose: () => void;
   pos: { x: number; y: number };
@@ -34,6 +53,11 @@ export default function AndroidRuntimePanel({ onClose, pos, onMove }: Props) {
   const [runtime, setRuntime] = useState<AndroidRuntimeStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [requestError, setRequestError] = useState<string | null>(null);
+  const [controlToken, setControlToken] = useState("");
+  const [packageName, setPackageName] = useState("com.example.testapk");
+  const [apkFile, setApkFile] = useState<File | null>(null);
+  const [operationBusy, setOperationBusy] = useState(false);
+  const [operationResult, setOperationResult] = useState<OperationResult | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -69,8 +93,70 @@ export default function AndroidRuntimePanel({ onClose, pos, onMove }: Props) {
     document.addEventListener("mouseup", handleUp, { once: true });
   };
 
+  const postOperation = useCallback(async (url: string, body: Record<string, unknown>) => {
+    setOperationBusy(true);
+    setOperationResult(null);
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${controlToken}`,
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await response.json() as OperationResult;
+      setOperationResult({ ...data, ok: response.ok && data.ok !== false });
+      if (response.ok && data.ok !== false) await refresh();
+    } catch (error) {
+      setOperationResult({ ok: false, status: "REQUEST_FAILED", message: error instanceof Error ? error.message : "Request failed." });
+    } finally {
+      setOperationBusy(false);
+    }
+  }, [controlToken, refresh]);
+
+  const installSelectedApk = useCallback(async () => {
+    if (!apkFile || !controlToken.trim() || !runtime?.ready || !/^(?=.{3,255}$)[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$/.test(packageName)) return;
+    if (apkFile.size > 150 * 1024 * 1024) {
+      setOperationResult({ ok: false, status: "APK_TOO_LARGE", message: "APK exceeds the 150 MB upload limit." });
+      return;
+    }
+    setOperationBusy(true);
+    setOperationResult(null);
+    try {
+      let sha256: string | undefined;
+      if (globalThis.crypto?.subtle) {
+        const digest = await globalThis.crypto.subtle.digest("SHA-256", await apkFile.arrayBuffer());
+        sha256 = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+      }
+      const headers: Record<string, string> = {
+        "Content-Type": "application/vnd.android.package-archive",
+        Authorization: `Bearer ${controlToken}`,
+      };
+      if (sha256) headers["X-APK-SHA256"] = sha256;
+      const response = await fetch(`/android/install?packageName=${encodeURIComponent(packageName)}`, {
+        method: "POST",
+        headers,
+        body: apkFile,
+      });
+      const data = await response.json() as OperationResult;
+      setOperationResult({ ...data, ok: response.ok && data.ok === true });
+      if (response.ok && data.ok === true) {
+        setApkFile(null);
+        const input = document.getElementById("arclight-apk-file") as HTMLInputElement | null;
+        if (input) input.value = "";
+        await refresh();
+      }
+    } catch (error) {
+      setOperationResult({ ok: false, status: "INSTALL_REQUEST_FAILED", message: error instanceof Error ? error.message : "Installation request failed." });
+    } finally {
+      setOperationBusy(false);
+    }
+  }, [apkFile, controlToken, packageName, runtime?.ready, refresh]);
+
   const status = runtime?.status ?? (requestError ? "DIAGNOSTICS_UNAVAILABLE" : "CHECKING");
   const ready = runtime?.ready === true;
+  const packageNameValid = /^(?=.{3,255}$)[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$/.test(packageName);
 
   return (
     <section
@@ -95,7 +181,7 @@ export default function AndroidRuntimePanel({ onClose, pos, onMove }: Props) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => void refresh()} disabled={loading} aria-label="Refresh runtime status" className="rounded-md p-1.5 hover:bg-white/10 disabled:opacity-50">
+          <button onClick={() => void refresh()} disabled={loading || operationBusy} aria-label="Refresh runtime status" className="rounded-md p-1.5 hover:bg-white/10 disabled:opacity-50">
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </button>
           <button onClick={onClose} aria-label="Close Android runtime diagnostics" className="rounded-md p-1.5 hover:bg-red-900/80">
@@ -160,6 +246,75 @@ export default function AndroidRuntimePanel({ onClose, pos, onMove }: Props) {
           </div>
         )}
 
+        <div className="space-y-3 rounded-xl border border-emerald-800/80 bg-black/20 p-3">
+          <div className="flex items-center gap-2 text-xs font-bold">
+            <LockKeyhole className="h-4 w-4 text-emerald-300" />
+            APK installer
+          </div>
+          <p className="text-[11px] leading-5 text-emerald-100/60">
+            The control token stays in this window's memory and is not saved. Configure ANDROID_CONTROL_TOKEN on the server before using install or launch.
+          </p>
+          <label className="block text-[10px] text-emerald-200/70">
+            Control token
+            <input
+              type="password"
+              autoComplete="off"
+              value={controlToken}
+              onChange={(event) => setControlToken(event.target.value)}
+              placeholder="Paste server control token"
+              className="mt-1 w-full rounded-lg border border-emerald-900 bg-[#07100b] px-3 py-2 font-mono text-xs text-emerald-50 outline-none focus:border-emerald-500"
+            />
+          </label>
+          <label className="block text-[10px] text-emerald-200/70">
+            Android package name (verify after install)
+            <input
+              value={packageName}
+              onChange={(event) => setPackageName(event.target.value.trim())}
+              placeholder="com.example.testapk"
+              spellCheck={false}
+              className="mt-1 w-full rounded-lg border border-emerald-900 bg-[#07100b] px-3 py-2 font-mono text-xs text-emerald-50 outline-none focus:border-emerald-500"
+            />
+          </label>
+          <label className="block text-[10px] text-emerald-200/70">
+            APK file
+            <input
+              id="arclight-apk-file"
+              type="file"
+              accept=".apk,application/vnd.android.package-archive"
+              onChange={(event) => setApkFile(event.target.files?.[0] ?? null)}
+              className="mt-1 block w-full text-xs text-emerald-100 file:mr-3 file:rounded-md file:border-0 file:bg-emerald-800 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-white hover:file:bg-emerald-700"
+            />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => void installSelectedApk()}
+              disabled={!ready || !controlToken.trim() || controlToken.trim().length < 32 || !apkFile || !packageNameValid || operationBusy}
+              className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {operationBusy ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+              Install APK
+            </button>
+            <button
+              onClick={() => void postOperation("/android/launch", { packageName })}
+              disabled={!ready || !controlToken.trim() || controlToken.trim().length < 32 || !packageNameValid || operationBusy}
+              className="inline-flex items-center gap-2 rounded-lg border border-emerald-700 px-3 py-2 text-xs font-bold text-emerald-100 hover:bg-emerald-950 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {operationBusy ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+              Launch package
+            </button>
+          </div>
+          {!ready && <p className="text-[10px] text-amber-200/80">Connect a real Android target first; installation is disabled while the runtime is offline.</p>}
+          {operationResult && (
+            <div className={`rounded-lg border p-3 ${operationResult.ok ? "border-emerald-700 bg-emerald-950/40" : "border-rose-800 bg-rose-950/30"}`}>
+              <div className="text-xs font-bold">{operationResult.status ?? (operationResult.ok ? "PASS" : "FAILED")}</div>
+              <p className="mt-1 break-words text-[11px] leading-5 text-emerald-50/75">
+                {operationResult.message ?? operationResult.reason ?? operationResult.note ?? operationResult.stderr ?? operationResult.runtime?.reason ?? operationResult.verificationOutput ?? operationResult.installOutput ?? operationResult.launchOutput ?? "See server diagnostics for the failing stage."}
+              </p>
+              {operationResult.sha256 && <p className="mt-2 break-all font-mono text-[10px] text-emerald-300">SHA-256: {operationResult.sha256}</p>}
+            </div>
+          )}
+        </div>
+
         {runtime?.diagnostics && runtime.diagnostics.length > 0 && (
           <div className="rounded-lg border border-amber-900/70 bg-black/20 p-3">
             <h3 className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-300">
@@ -175,7 +330,6 @@ export default function AndroidRuntimePanel({ onClose, pos, onMove }: Props) {
         <p className="text-[10px] text-emerald-100/40">
           {runtime?.checkedAt ? `Last checked: ${new Date(runtime.checkedAt).toLocaleTimeString()}` : "No verified runtime result yet."}
         </p>
-        {!ready && <div className="text-[11px] leading-5 text-emerald-100/60">APK installation stays disabled until a real Android target responds. This panel never treats a missing runtime as installed or ready.</div>}
       </div>
     </section>
   );
