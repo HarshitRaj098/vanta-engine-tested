@@ -85,6 +85,7 @@ async function remoteAgentRequest(pathname: string, init: RequestInit = {}, time
     const response = await fetch(`${config.baseUrl}${pathname}`, {
       ...init,
       headers,
+      redirect: "error",
       signal: AbortSignal.timeout(timeoutMs),
     });
     const data = await response.json().catch(() => ({}));
