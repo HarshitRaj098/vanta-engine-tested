@@ -48,11 +48,11 @@ export type RemoteAgentConfig =
 
 export function getRemoteAgentConfig(): RemoteAgentConfig {
   const rawUrl = process.env.ANDROID_HOST_AGENT_URL?.trim() ?? "";
-  const token = process.env.ANDROID_HOST_AGENT_TOKEN?.trim() ?? "";
+  const token = process.env.ANDROID_HOST_AGENT_CLIENT_TOKEN?.trim() ?? "";
   if (!rawUrl && !token) return { state: "none" };
   if (!rawUrl) return { state: "invalid", reason: "ANDROID_HOST_AGENT_URL is missing." };
   if (token.length < 32 || token === "replace-with-at-least-32-random-characters") {
-    return { state: "invalid", reason: "ANDROID_HOST_AGENT_TOKEN must be a fresh secret of at least 32 characters." };
+    return { state: "invalid", reason: "ANDROID_HOST_AGENT_CLIENT_TOKEN must be a fresh secret of at least 32 characters." };
   }
   try {
     const url = new URL(rawUrl);
