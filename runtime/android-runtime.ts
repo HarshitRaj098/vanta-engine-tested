@@ -398,6 +398,19 @@ export async function getAndroidRuntimeStatus(serial?: string): Promise<AndroidR
 }
 
 export async function listAdbDevices() {
+  const remoteConfig = getRemoteAgentConfig();
+  if (remoteConfig.state === "invalid") {
+    return { available: false, version: null, devices: [] as AdbDevice[], error: remoteConfig.reason };
+  }
+  if (remoteConfig.state === "configured") {
+    const remote = await remoteAgentRequest("/runtime/devices");
+    return {
+      available: remote.ok && remote.data.available === true,
+      version: typeof remote.data.version === "string" ? remote.data.version : null,
+      devices: Array.isArray(remote.data.devices) ? remote.data.devices as AdbDevice[] : [],
+      error: typeof remote.data.error === "string" ? remote.data.error : remote.ok ? undefined : String(remote.data.reason ?? remote.data.status ?? "REMOTE_HOST_DISCONNECTED"),
+    };
+  }
   const version = await runCommand("adb", ["version"]);
   if (!version.ok) {
     return { available: false, version: null, devices: [] as AdbDevice[], error: version.errorCode ?? version.stderr ?? "ADB_NOT_INSTALLED" };
@@ -412,7 +425,23 @@ export async function listAdbDevices() {
 }
 
 export async function listInstalledPackages(serial?: string) {
-  const runtime = await getAndroidRuntimeStatus(serial);
+  const remoteConfig = getRemoteAgentConfig();
+  if (remoteConfig.state === "invalid") {
+    return { ok: false, status: "REMOTE_HOST_CONFIGURATION_INVALID", reason: remoteConfig.reason, packages: [] as string[] };
+  }
+  if (remoteConfig.state === "configured") {
+    const query = serial ? `?serial=${encodeURIComponent(serial)}` : "";
+    const remote = await remoteAgentRequest(`/runtime/packages${query}`, {}, 20_000);
+    return {
+      ok: remote.ok && remote.data.ok === true,
+      status: typeof remote.data.status === "string" ? remote.data.status : "REMOTE_PACKAGE_QUERY_FAILED",
+      runtime: remote.data.runtime,
+      packages: Array.isArray(remote.data.packages) ? remote.data.packages as string[] : [],
+      stderr: typeof remote.data.stderr === "string" ? remote.data.stderr : undefined,
+      reason: typeof remote.data.reason === "string" ? remote.data.reason : undefined,
+    };
+  }
+  const runtime = await getLocalAndroidRuntimeStatus(serial);
   if (!runtime.ready) return { ok: false, status: runtime.status, runtime, packages: [] as string[] };
   const result = runtime.adapter === "waydroid"
     ? await runCommand("waydroid", ["shell", "pm", "list", "packages", "-3"])
@@ -446,7 +475,38 @@ export async function installApk(filePath: string, packageName: string, serial?:
     return { ok: false, status: "APK_UNAVAILABLE", reason: error instanceof Error ? error.message : "Cannot read APK." };
   }
 
-  const runtime = await getAndroidRuntimeStatus(serial);
+  const remoteConfig = getRemoteAgentConfig();
+  if (remoteConfig.state === "invalid") {
+    return { ok: false, status: "REMOTE_HOST_CONFIGURATION_INVALID", reason: remoteConfig.reason };
+  }
+  if (remoteConfig.state === "configured") {
+    const bytes = await readFile(safePath);
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    const query = new URLSearchParams({ packageName });
+    if (serial) query.set("serial", serial);
+    const headers: Record<string, string> = {
+      "Content-Type": "application/vnd.android.package-archive",
+      "X-APK-SHA256": hash,
+    };
+    const remote = await remoteAgentRequest(`/runtime/install?${query.toString()}`, {
+      method: "POST",
+      headers,
+      body: new Uint8Array(bytes),
+    }, 180_000);
+    if (!remote.ok || remote.data.ok !== true) {
+      return {
+        ok: false,
+        status: typeof remote.data.status === "string" ? remote.data.status : "REMOTE_INSTALL_FAILED",
+        reason: typeof remote.data.reason === "string" ? remote.data.reason : "The remote host did not verify the installed package.",
+        remoteStatus: remote.status,
+        sha256: hash,
+        runtime: remote.data.runtime,
+      };
+    }
+    return { ...remote.data, ok: true, remote: true, transferredSha256: hash };
+  }
+
+  const runtime = await getLocalAndroidRuntimeStatus(serial);
   if (!runtime.ready) return { ok: false, status: runtime.status, reason: runtime.reason, runtime };
 
   const install = runtime.adapter === "waydroid"
@@ -473,7 +533,17 @@ export async function installApk(filePath: string, packageName: string, serial?:
 
 export async function launchPackage(packageName: string, serial?: string) {
   if (!isValidPackageName(packageName)) return { ok: false, status: "INVALID_PACKAGE_NAME", reason: "Invalid Android package name." };
-  const runtime = await getAndroidRuntimeStatus(serial);
+  const remoteConfig = getRemoteAgentConfig();
+  if (remoteConfig.state === "invalid") return { ok: false, status: "REMOTE_HOST_CONFIGURATION_INVALID", reason: remoteConfig.reason };
+  if (remoteConfig.state === "configured") {
+    const remote = await remoteAgentRequest("/runtime/launch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ packageName, ...(serial ? { serial } : {}) }),
+    }, 30_000);
+    return { ...remote.data, ok: remote.ok && remote.data.ok === true, remote: true };
+  }
+  const runtime = await getLocalAndroidRuntimeStatus(serial);
   if (!runtime.ready) return { ok: false, status: runtime.status, reason: runtime.reason, runtime };
   const verify = runtime.adapter === "waydroid"
     ? await runCommand("waydroid", ["shell", "pm", "path", packageName])
@@ -502,7 +572,17 @@ export async function launchPackage(packageName: string, serial?: string) {
 
 export async function uninstallPackage(packageName: string, serial?: string) {
   if (!isValidPackageName(packageName)) return { ok: false, status: "INVALID_PACKAGE_NAME" };
-  const runtime = await getAndroidRuntimeStatus(serial);
+  const remoteConfig = getRemoteAgentConfig();
+  if (remoteConfig.state === "invalid") return { ok: false, status: "REMOTE_HOST_CONFIGURATION_INVALID", reason: remoteConfig.reason };
+  if (remoteConfig.state === "configured") {
+    const remote = await remoteAgentRequest("/runtime/uninstall", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ packageName, ...(serial ? { serial } : {}) }),
+    }, 90_000);
+    return { ...remote.data, ok: remote.ok && remote.data.ok === true, remote: true };
+  }
+  const runtime = await getLocalAndroidRuntimeStatus(serial);
   if (!runtime.ready) return { ok: false, status: runtime.status, reason: runtime.reason, runtime };
   const uninstall = runtime.adapter === "waydroid"
     ? await runCommand("waydroid", ["app", "remove", packageName], 60_000)
