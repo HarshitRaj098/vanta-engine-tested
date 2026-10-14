@@ -1,4 +1,5 @@
 import { execFile as execFileCallback } from "node:child_process";
+import { createHash } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { access, readFile } from "node:fs/promises";
 import process from "node:process";
