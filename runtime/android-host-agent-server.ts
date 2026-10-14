@@ -170,6 +170,9 @@ async function startHostAgent() {
   const certPath = process.env.ANDROID_HOST_AGENT_TLS_CERT;
   const keyPath = process.env.ANDROID_HOST_AGENT_TLS_KEY;
   const isLoopback = host === "localhost" || host === "127.0.0.1" || host === "::1";
+  if (Boolean(certPath) !== Boolean(keyPath)) {
+    throw new Error("Configure both ANDROID_HOST_AGENT_TLS_CERT and ANDROID_HOST_AGENT_TLS_KEY, or leave both unset.");
+  }
   if (!isLoopback && (!certPath || !keyPath)) {
     throw new Error("Non-loopback binding requires ANDROID_HOST_AGENT_TLS_CERT and ANDROID_HOST_AGENT_TLS_KEY. Prefer a TLS reverse proxy/tunnel to the loopback listener.");
   }
