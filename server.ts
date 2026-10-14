@@ -22,8 +22,12 @@ const MAX_APK_BYTES = 150 * 1024 * 1024;
 const CONTROL_TOKEN = process.env.ANDROID_CONTROL_TOKEN ?? "";
 const sessions = new Map<string, { createdAt: string; serial?: string; adapter: string }>();
 
+function isControlTokenConfigured(): boolean {
+  return CONTROL_TOKEN.length >= 32 && CONTROL_TOKEN !== "replace-with-at-least-32-random-characters";
+}
+
 function isAuthorized(req: Request): boolean {
-  if (CONTROL_TOKEN.length < 32) return false;
+  if (!isControlTokenConfigured()) return false;
   const header = req.header("authorization") ?? "";
   const prefix = "Bearer ";
   if (!header.startsWith(prefix)) return false;
@@ -33,7 +37,7 @@ function isAuthorized(req: Request): boolean {
 }
 
 function requireControlToken(req: Request, res: Response, next: NextFunction) {
-  if (CONTROL_TOKEN.length < 32) {
+  if (!isControlTokenConfigured()) {
     return res.status(503).json({
       error: "CONTROL_AUTH_NOT_CONFIGURED",
       message: "Set ANDROID_CONTROL_TOKEN to a cryptographically random secret of at least 32 characters before enabling Android control operations.",
@@ -252,7 +256,7 @@ async function startServer() {
   const host = process.env.HOST || "0.0.0.0";
   app.listen(port, host, () => {
     console.log(`Arclight gateway listening on ${host}:${port}`);
-    if (CONTROL_TOKEN.length < 32) {
+    if (!isControlTokenConfigured()) {
       console.warn("Android control routes disabled: configure ANDROID_CONTROL_TOKEN (at least 32 characters).");
     }
   });
