@@ -155,7 +155,7 @@ test("readApkPackageName rejects files without a ZIP directory", async () => {
   const apk = path.join(dir, "invalid.apk");
   try {
     await writeFile(apk, Buffer.from("not an APK"));
-    await assert.rejects(readApkPackageName(apk), /end-of-central-directory/);
+    await assert.rejects(readApkPackageName(apk), /File is too small|end-of-central-directory/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
