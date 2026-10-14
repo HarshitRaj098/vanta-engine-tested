@@ -104,7 +104,7 @@ export async function getHostCapabilities() {
   const binderModule = await pathExists("/sys/module/binder_linux");
   const kvmDevice = await pathExists("/dev/kvm");
   const adbVersion = await runCommand("adb", ["version"]);
-  const waydroidVersion = await runCommand("waydroid", ["--version"]);
+  const waydroidVersion = await runCommand("waydroid", ["-V"]);
   const emulatorVersion = await runCommand("emulator", ["-version"], 3_000);
 
   return {
@@ -346,7 +346,7 @@ export async function installApk(filePath: string, packageName: string, serial?:
   const install = runtime.adapter === "waydroid"
     ? await runCommand("waydroid", ["app", "install", safePath], 120_000)
     : await runCommand("adb", ["-s", runtime.target!.serial, "install", "-r", safePath], 120_000);
-  if (!install.ok || /\\bFailure\\b|Error\\[/i.test(install.stdout + "\n" + install.stderr)) {
+  if (!install.ok || /\bFailure\b|Error\[/i.test(install.stdout + "\n" + install.stderr)) {
     return { ok: false, status: "INSTALL_FAILED", runtime, commandExitCode: install.exitCode, stdout: install.stdout, stderr: install.stderr || install.errorCode };
   }
 
