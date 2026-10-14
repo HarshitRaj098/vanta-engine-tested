@@ -262,7 +262,7 @@ async function queryWaydroid(host: Awaited<ReturnType<typeof getHostCapabilities
   };
 }
 
-export async function getAndroidRuntimeStatus(serial?: string): Promise<AndroidRuntimeProbe> {
+export async function getLocalAndroidRuntimeStatus(serial?: string): Promise<AndroidRuntimeProbe> {
   const host = await getHostCapabilities();
   const adbVersion = await runCommand("adb", ["version"]);
   const adbDevicesResult = adbVersion.ok ? await runCommand("adb", ["devices", "-l"]) : null;
@@ -347,6 +347,53 @@ export async function getAndroidRuntimeStatus(serial?: string): Promise<AndroidR
     },
     adb: { available: host.adbAvailable, version: host.adbVersion },
     diagnostics,
+  };
+}
+
+
+export async function getAndroidRuntimeStatus(serial?: string): Promise<AndroidRuntimeProbe> {
+  const config = getRemoteAgentConfig();
+  if (config.state === "none") return getLocalAndroidRuntimeStatus(serial);
+
+  if (config.state === "invalid") {
+    const host = await getHostCapabilities();
+    return {
+      status: "REMOTE_HOST_CONFIGURATION_INVALID",
+      ready: false,
+      adapter: "none",
+      checkedAt: new Date().toISOString(),
+      reason: config.reason,
+      host: {
+        platform: host.platform, architecture: host.architecture, kernel: host.kernel,
+        gvisor: host.gvisor, binderDevice: host.binderDevice, binderModule: host.binderModule, kvmDevice: host.kvmDevice,
+      },
+      adb: { available: host.adbAvailable, version: host.adbVersion },
+      diagnostics: ["Remote host-agent configuration is present but invalid; local runtime was not substituted."],
+    };
+  }
+
+  const query = serial ? `?serial=${encodeURIComponent(serial)}` : "";
+  const response = await remoteAgentRequest(`/runtime/status${query}`, {}, 12_000);
+  const remoteRuntime = response.data.runtime as AndroidRuntimeProbe | undefined;
+  if (remoteRuntime && typeof remoteRuntime.ready === "boolean" && typeof remoteRuntime.status === "string") {
+    return remoteRuntime;
+  }
+
+  const host = await getHostCapabilities();
+  return {
+    status: response.data.status === "REMOTE_HOST_CONFIGURATION_INVALID" ? response.data.status : "REMOTE_HOST_DISCONNECTED",
+    ready: false,
+    adapter: "none",
+    checkedAt: new Date().toISOString(),
+    reason: typeof response.data.reason === "string"
+      ? response.data.reason
+      : `Remote host agent returned HTTP ${response.status} without a valid runtime status.`,
+    host: {
+      platform: host.platform, architecture: host.architecture, kernel: host.kernel,
+      gvisor: host.gvisor, binderDevice: host.binderDevice, binderModule: host.binderModule, kvmDevice: host.kvmDevice,
+    },
+    adb: { available: host.adbAvailable, version: host.adbVersion },
+    diagnostics: ["Remote runtime state could not be verified; local ADB/Waydroid state is not substituted."],
   };
 }
 
