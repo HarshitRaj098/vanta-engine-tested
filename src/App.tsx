@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import AndroidRuntimePanel from './components/AndroidRuntimePanel';
 
 type ObjType = 'FILE' | 'APP' | 'NET' | 'PROCESS';
 
@@ -21,6 +22,7 @@ const getAppIconBg = (id: string) => {
   if (id === 'vscode') return 'bg-gradient-to-br from-sky-500 to-indigo-600 text-white';
   if (id === 'file') return 'bg-gradient-to-br from-amber-400 to-yellow-600 text-white';
   if (id === 'term') return 'bg-gradient-to-br from-emerald-600 to-green-800 text-white';
+  if (id === 'android-runtime') return 'bg-gradient-to-br from-green-500 to-emerald-700 text-white';
   return 'bg-gradient-to-br from-gray-600 to-gray-800 text-white';
 };
 
@@ -29,6 +31,7 @@ const getObjectIcon = (obj: OsObject) => {
   if (obj.id === 'calculator') return '🧮';
   if (obj.id === 'vscode') return '⚡';
   if (obj.id === 'term') return '📟';
+  if (obj.id === 'android-runtime') return '🤖';
   if (obj.type === 'FILE') return '📁';
   if (obj.type === 'PROCESS') return '⚙️';
   return '📦';
@@ -516,6 +519,7 @@ export default function App() {
     { id: 'vscode', type: 'APP', label: 'Code Studio', x: 240, y: 80 },
     { id: 'file', type: 'FILE', label: 'My Files', x: 20, y: 220 },
     { id: 'term', type: 'PROCESS', label: 'Terminal', x: 130, y: 220 },
+    { id: 'android-runtime', type: 'APP', label: 'Android Runtime', x: 240, y: 220 },
   ]);
 
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
@@ -524,6 +528,7 @@ export default function App() {
   const [isVSCodeOpen, setIsVSCodeOpen] = useState(false);
   const [isTermOpen, setIsTermOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isAndroidRuntimeOpen, setIsAndroidRuntimeOpen] = useState(false);
 
   // Window positions
   const [winPos, setWinPos] = useState({
@@ -532,7 +537,8 @@ export default function App() {
     calc: { x: 400, y: 100 },
     vscode: { x: 150, y: 60 },
     term: { x: 300, y: 200 },
-    settings: { x: 200, y: 120 }
+    settings: { x: 200, y: 120 },
+    android: { x: 320, y: 70 }
   });
 
   const updateWinPos = (id: string, x: number, y: number) => {
@@ -572,6 +578,7 @@ export default function App() {
     else if (id === 'vscode') setIsVSCodeOpen(true);
     else if (id === 'file') setIsFilesOpen(true);
     else if (id === 'term') setIsTermOpen(true);
+    else if (id === 'android-runtime') setIsAndroidRuntimeOpen(true);
   };
 
   return (
@@ -620,6 +627,7 @@ export default function App() {
         {isVSCodeOpen && <VSCodeWindow onClose={() => setIsVSCodeOpen(false)} pos={winPos.vscode} onMove={(x, y) => updateWinPos('vscode', x, y)} />}
         {isTermOpen && <TerminalWindow onClose={() => setIsTermOpen(false)} pos={winPos.term} onMove={(x, y) => updateWinPos('term', x, y)} />}
         {isSettingsOpen && <SettingsWindow onClose={() => setIsSettingsOpen(false)} pos={winPos.settings} onMove={(x, y) => updateWinPos('settings', x, y)} />}
+        {isAndroidRuntimeOpen && <AndroidRuntimePanel onClose={() => setIsAndroidRuntimeOpen(false)} pos={winPos.android} onMove={(x, y) => updateWinPos('android', x, y)} />}
       </div>
 
       {/* Bottom TouchWiz Nature UX Dock */}
@@ -659,6 +667,13 @@ export default function App() {
           >
             <span className="text-xl">📟</span> 
             <span className="text-[10px] font-medium">Terminal</span>
+          </button>
+          <button 
+            onClick={() => setIsAndroidRuntimeOpen(prev => !prev)}
+            className="flex flex-col items-center justify-center px-3 py-1 rounded-xl hover:bg-[#1b4332]/50 text-xs text-emerald-200 cursor-pointer transition-colors"
+          >
+            <span className="text-xl">🤖</span>
+            <span className="text-[10px] font-medium">Android</span>
           </button>
           <button 
             onClick={() => setIsSettingsOpen(prev => !prev)}
