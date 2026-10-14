@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import process from "node:process";
 import { parseAdbDevices, isValidPackageName, runCommand } from "./android-runtime.js";
 
 test("parseAdbDevices ignores the header and blank lines", () => {
