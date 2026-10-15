@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   Activity, AlertTriangle, CheckCircle2, RefreshCw, Smartphone, XCircle,
-  Upload, Play, LockKeyhole, LoaderCircle,
+  Upload, Play, LockKeyhole, LoaderCircle, ScanSearch,
 } from "lucide-react";
 
 type AndroidRuntimeStatus = {
@@ -32,6 +32,8 @@ type OperationResult = {
   message?: string;
   reason?: string;
   packageName?: string;
+  actualPackageName?: string;
+  expectedPackageName?: string;
   sha256?: string;
   installOutput?: string;
   verificationOutput?: string;
@@ -57,6 +59,7 @@ export default function AndroidRuntimePanel({ onClose, pos, onMove }: Props) {
   const [packageName, setPackageName] = useState("com.example.testapk");
   const [apkFile, setApkFile] = useState<File | null>(null);
   const [operationBusy, setOperationBusy] = useState(false);
+  const [inspectBusy, setInspectBusy] = useState(false);
   const [operationResult, setOperationResult] = useState<OperationResult | null>(null);
 
   const refresh = useCallback(async () => {
@@ -114,6 +117,44 @@ export default function AndroidRuntimePanel({ onClose, pos, onMove }: Props) {
       setOperationBusy(false);
     }
   }, [controlToken, refresh]);
+
+  const inspectSelectedApk = useCallback(async () => {
+    if (!apkFile || !controlToken.trim() || controlToken.trim().length < 32) return;
+    if (apkFile.size > 150 * 1024 * 1024) {
+      setOperationResult({ ok: false, status: "APK_TOO_LARGE", message: "APK exceeds the 150 MB upload limit." });
+      return;
+    }
+    setInspectBusy(true);
+    setOperationResult(null);
+    try {
+      if (globalThis.crypto?.subtle === undefined) {
+        setOperationResult({ ok: false, status: "HASH_UNAVAILABLE", message: "SHA-256 is unavailable in this browser context. Use a secure HTTPS connection." });
+        return;
+      }
+      const digest = await globalThis.crypto.subtle.digest("SHA-256", await apkFile.arrayBuffer());
+      const sha256 = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+      const response = await fetch("/android/inspect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/vnd.android.package-archive",
+          Authorization: `Bearer ${controlToken}`,
+          "X-APK-SHA256": sha256,
+        },
+        body: apkFile,
+      });
+      const data = await response.json() as OperationResult;
+      if (response.ok && data.ok === true && data.packageName) {
+        setPackageName(data.packageName);
+        setOperationResult({ ...data, message: `Detected package: ${data.packageName}. Package name was read from AndroidManifest.xml.` });
+      } else {
+        setOperationResult({ ...data, ok: false, message: data.message ?? data.reason ?? "APK inspection failed." });
+      }
+    } catch (error) {
+      setOperationResult({ ok: false, status: "APK_INSPECTION_FAILED", message: error instanceof Error ? error.message : "APK inspection failed." });
+    } finally {
+      setInspectBusy(false);
+    }
+  }, [apkFile, controlToken]);
 
   const installSelectedApk = useCallback(async () => {
     if (!apkFile || !controlToken.trim() || !runtime?.ready || !/^(?=.{3,255}$)[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$/.test(packageName)) return;
@@ -181,7 +222,7 @@ export default function AndroidRuntimePanel({ onClose, pos, onMove }: Props) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => void refresh()} disabled={loading || operationBusy} aria-label="Refresh runtime status" className="rounded-md p-1.5 hover:bg-white/10 disabled:opacity-50">
+          <button onClick={() => void refresh()} disabled={loading || operationBusy || inspectBusy} aria-label="Refresh runtime status" className="rounded-md p-1.5 hover:bg-white/10 disabled:opacity-50">
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </button>
           <button onClick={onClose} aria-label="Close Android runtime diagnostics" className="rounded-md p-1.5 hover:bg-red-900/80">
@@ -287,8 +328,16 @@ export default function AndroidRuntimePanel({ onClose, pos, onMove }: Props) {
           </label>
           <div className="flex flex-wrap gap-2">
             <button
+              onClick={() => void inspectSelectedApk()}
+              disabled={!controlToken.trim() || controlToken.trim().length < 32 || !apkFile || operationBusy || inspectBusy}
+              className="inline-flex items-center gap-2 rounded-lg border border-emerald-700 px-3 py-2 text-xs font-bold text-emerald-100 hover:bg-emerald-950 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {inspectBusy ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <ScanSearch className="h-3.5 w-3.5" />}
+              Inspect APK
+            </button>
+            <button
               onClick={() => void installSelectedApk()}
-              disabled={!ready || !controlToken.trim() || controlToken.trim().length < 32 || !apkFile || !packageNameValid || operationBusy}
+              disabled={!ready || !controlToken.trim() || controlToken.trim().length < 32 || !apkFile || !packageNameValid || operationBusy || inspectBusy}
               className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {operationBusy ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
@@ -296,7 +345,7 @@ export default function AndroidRuntimePanel({ onClose, pos, onMove }: Props) {
             </button>
             <button
               onClick={() => void postOperation("/android/launch", { packageName })}
-              disabled={!ready || !controlToken.trim() || controlToken.trim().length < 32 || !packageNameValid || operationBusy}
+              disabled={!ready || !controlToken.trim() || controlToken.trim().length < 32 || !packageNameValid || operationBusy || inspectBusy}
               className="inline-flex items-center gap-2 rounded-lg border border-emerald-700 px-3 py-2 text-xs font-bold text-emerald-100 hover:bg-emerald-950 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {operationBusy ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
