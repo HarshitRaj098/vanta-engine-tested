@@ -7,6 +7,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createServer } from "vite";
+import { readApkPackageName } from "./runtime/apk-metadata.js";
 import {
   getAndroidRuntimeStatus,
   installApk,
@@ -163,6 +164,50 @@ async function startServer() {
     if (!sessions.delete(req.params.id)) return res.status(404).json({ error: "SESSION_NOT_FOUND" });
     res.json({ status: "DISCONNECTED", note: "The Arclight session was removed; the Android device was not powered off." });
   });
+
+  // Inspect an uploaded APK without requiring a connected Android runtime.
+  // The returned package name comes from AndroidManifest.xml, never from the filename.
+  app.post(
+    "/android/inspect",
+    requireControlToken,
+    express.raw({ type: "application/vnd.android.package-archive", limit: MAX_APK_BYTES }),
+    async (req, res) => {
+      if (!Buffer.isBuffer(req.body) || req.body.length < 4) {
+        return res.status(415).json({
+          ok: false,
+          status: "APK_BODY_REQUIRED",
+          message: "Send raw APK bytes using Content-Type: application/vnd.android.package-archive.",
+        });
+      }
+      if (req.body[0] !== 0x50 || req.body[1] !== 0x4b) {
+        return res.status(400).json({ ok: false, status: "APK_INVALID", message: "The upload does not have a ZIP/APK signature." });
+      }
+      const sha256 = createHash("sha256").update(req.body).digest("hex");
+      const expectedHash = req.header("x-apk-sha256");
+      if (!expectedHash || !/^[a-f0-9]{64}$/i.test(expectedHash) || expectedHash.toLowerCase() !== sha256) {
+        return res.status(400).json({ ok: false, status: "APK_HASH_MISMATCH", sha256 });
+      }
+
+      const directory = await mkdtemp(path.join(tmpdir(), "arclight-apk-inspect-"));
+      const apkPath = path.join(directory, "inspect.apk");
+      try {
+        await writeFile(apkPath, req.body, { flag: "wx", mode: 0o600 });
+        const packageName = await readApkPackageName(apkPath);
+        if (!isValidPackageName(packageName)) {
+          return res.status(422).json({ ok: false, status: "APK_MANIFEST_INVALID", message: "The package name extracted from AndroidManifest.xml is invalid." });
+        }
+        return res.json({ ok: true, status: "APK_INSPECTED", packageName, sha256 });
+      } catch (error) {
+        return res.status(422).json({
+          ok: false,
+          status: "APK_MANIFEST_UNREADABLE",
+          message: error instanceof Error ? error.message : "Could not read AndroidManifest.xml.",
+        });
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
 
   // APK upload is raw bytes, never a caller-supplied filesystem path.
   // Runtime health is checked before the request body is buffered.
